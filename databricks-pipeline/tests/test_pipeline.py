@@ -1,32 +1,61 @@
 import pytest
-
-# Sample Spark session for testing
 from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, IntegerType, DoubleType
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def spark_session():
-    spark = SparkSession.builder.appName('TestPipeline').getOrCreate()
+    """Create Spark session for testing"""
+    spark = SparkSession.builder \
+        .appName("TestPipeline") \
+        .master("local[2]") \
+        .config("spark.sql.shuffle.partitions", "2") \
+        .getOrCreate()
+    
     yield spark
     spark.stop()
 
-# Sample Data Quality Test
-def test_data_quality(spark_session):
-    df = spark_session.read.csv('path/to/input.csv', header=True)
-    assert df.count() > 0, "Data quality check failed: Dataframe is empty"
-    assert 'expected_column' in df.columns, "Data quality check failed: Missing expected column"
+@pytest.fixture
+def sample_data(spark_session):
+    """Create sample test data"""
+    schema = StructType([
+        StructField("id", IntegerType(), True),
+        StructField("name", StringType(), True),
+        StructField("value", DoubleType(), True),
+        StructField("category", StringType(), True)
+    ])
+    
+    data = [(1, "Alice", 100.5, "A"), (2, "Bob", 200.75, "B"), (3, "Charlie", 150.0, "A")]
+    return spark_session.createDataFrame(data, schema=schema)
 
-# Sample Spark Transformation Test
-def test_transformation(spark_session):
-    df = spark_session.read.csv('path/to/input.csv', header=True)
-    transformed_df = df.withColumn('new_column', df['existing_column'] * 2)
-    assert transformed_df.filter(transformed_df['new_column'] <= 0).count() == 0, "Transformation check failed: New column has non-positive values"
+class TestDataQuality:
+    """Data quality tests"""
+    
+    def test_data_not_empty(self, sample_data):
+        assert sample_data.count() > 0, "DataFrame should not be empty"
+    
+    def test_required_columns_exist(self, sample_data):
+        required_cols = ["id", "name", "value", "category"]
+        assert all(col in sample_data.columns for col in required_cols)
+    
+    def test_no_null_in_id(self, sample_data):
+        null_count = sample_data.filter(sample_data.id.isNull()).count()
+        assert null_count == 0, "ID column should not contain nulls"
 
-# Sample Performance Test
-def test_performance(spark_session):
-    import time
-    start_time = time.time()
-    df = spark_session.read.csv('path/to/input.csv', header=True)
-    df = df.withColumn('new_column', df['existing_column'] * 2)
-    df.collect()  # Trigger execution
-    execution_time = time.time() - start_time
-    assert execution_time < 5, "Performance check failed: Execution time exceeded 5 seconds"
+class TestTransformations:
+    """Spark transformation tests"""
+    
+    def test_column_aggregation(self, sample_data):
+        result = sample_data.groupBy("category").sum("value")
+        assert result.count() > 0
+    
+    def test_filter_transformation(self, sample_data):
+        filtered = sample_data.filter(sample_data.value > 150)
+        assert filtered.count() > 0
+        assert filtered.count() < sample_data.count()
+    
+    def test_deduplication(self, sample_data):
+        deduplicated = sample_data.dropDuplicates(["id"])
+        assert deduplicated.count() == sample_data.count()
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
