@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'AWS ETL Pipeline Infrastructure'
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: dev
+
+Resources:
+  DataSourceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'data-source-${AWS::AccountId}-${EnvironmentName}'
+      VersioningConfiguration:
+        Status: Enabled
+
+  ProcessedDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'processed-data-${AWS::AccountId}-${EnvironmentName}'
+
+  DataProcessingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: data-processing-queue
+      VisibilityTimeout: 300
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DataProcessingDLQ.Arn
+        maxReceiveCount: 3
+
+  DataProcessingDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: data-processing-dlq
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+Outputs:
+  DataSourceBucketName:
+    Value: !Ref DataSourceBucket
+  ProcessedDataBucketName:
+    Value: !Ref ProcessedDataBucket
+  QueueUrl:
+    Value: !Ref DataProcessingQueue
