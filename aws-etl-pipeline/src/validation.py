@@ -1,52 +1,85 @@
-import pandas as pd
-from pyspark.sql import SparkSession
-from pyspark.sql.types import StructType, StructField, StringType, IntegerType
+import json
+import logging
+from jsonschema import validate, ValidationError
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class DataValidator:
-    def __init__(self, schema):
-        self.schema = schema
-        self.spark = SparkSession.builder.appName("DataValidator").getOrCreate()
-
-    def validate_schema(self, df):
-        if df.schema != self.schema:
-            raise ValueError("Schema validation failed!")
-        print("Schema validation passed!")
-
-    def validate_business_rules(self, df):
-        # Add business rules validation logic here
-        # For example: 
-        # Ensure that 'age' column values are non-negative
-        invalid_rows = df.filter(df.age < 0)
-        if invalid_rows.count() > 0:
-            raise ValueError("Business rules validation failed: Found invalid age values!")
-        print("Business rules validation passed!")
-
-    def detect_duplicates(self, df, subset):
-        duplicates = df[df.duplicated(subset=subset, keep=False)]
-        if not duplicates.empty:
-            raise ValueError("Duplicates detected!")
-        print("No duplicates found!")
-
-    def validate(self, df):
-        self.validate_schema(df)
-        self.validate_business_rules(df)
-        self.detect_duplicates(df, subset=['id'])  # Assuming 'id' is the primary key
-
-# Example usage:
-if __name__ == '__main__':
-    # Define the schema
-    schema = StructType([
-        StructField('id', IntegerType(), True),
-        StructField('name', StringType(), True),
-        StructField('age', IntegerType(), True)
-    ])
-
-    # Create an instance of the validator
-    validator = DataValidator(schema)
+    """Comprehensive data validation framework for ETL pipelines"""
     
-    # Sample DataFrame (replace with your data)
-    sample_data = [(1, 'Alice', 30), (2, 'Bob', -5), (3, 'Charlie', 25), (1, 'Alice', 30)]
-    df = pd.DataFrame(sample_data, columns=['id', 'name', 'age'])
-
-    # Validate the DataFrame
-    validator.validate(df)
+    def __init__(self, schema=None):
+        """Initialize validator with JSON schema"""
+        self.schema = schema
+        self.processed_ids = set()
+    
+    def validate_schema(self, data):
+        """Validate data against JSON schema"""
+        if not self.schema:
+            logger.warning("No schema provided for validation")
+            return True, None
+        
+        try:
+            validate(instance=data, schema=self.schema)
+            logger.debug(f"Schema validation passed for record: {data.get('id', 'unknown')}")
+            return True, None
+        except ValidationError as e:
+            error_msg = f"Schema validation failed: {e.message}"
+            logger.error(error_msg)
+            return False, error_msg
+    
+    def validate_business_rules(self, data):
+        """Validate business-specific rules"""
+        errors = []
+        
+        if not data.get("id"):
+            errors.append("ID is required and cannot be empty")
+        
+        if not data.get("email"):
+            errors.append("Email is required")
+        
+        if data.get("email") and "@" not in str(data.get("email", "")):
+            errors.append("Invalid email format")
+        
+        if data.get("amount") and float(data.get("amount", 0)) < 0:
+            errors.append("Amount cannot be negative")
+        
+        if errors:
+            error_msg = f"Business rules validation failed: {', '.join(errors)}"
+            logger.error(error_msg)
+            return False, error_msg
+        
+        logger.debug(f"Business rules validation passed for record: {data.get('id')}")
+        return True, None
+    
+    def detect_duplicates(self, data):
+        """Detect duplicate records based on ID"""
+        record_id = data.get("id")
+        
+        if record_id in self.processed_ids:
+            error_msg = f"Duplicate record detected: {record_id}"
+            logger.error(error_msg)
+            return False, error_msg
+        
+        self.processed_ids.add(record_id)
+        logger.debug(f"Duplicate check passed for record: {record_id}")
+        return True, None
+    
+    def validate_data_quality(self, data):
+        """Comprehensive data quality validation"""
+        logger.info(f"Starting validation for record: {data.get('id', 'unknown')}")
+        
+        is_valid, error = self.validate_schema(data)
+        if not is_valid:
+            return False, error
+        
+        is_valid, error = self.validate_business_rules(data)
+        if not is_valid:
+            return False, error
+        
+        is_valid, error = self.detect_duplicates(data)
+        if not is_valid:
+            return False, error
+        
+        logger.info(f"All validations passed for record: {data.get('id')}")
+        return True, None
