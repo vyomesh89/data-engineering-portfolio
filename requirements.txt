@@ -1,0 +1,9 @@
+boto3==1.26.137
+botocore==1.29.137
+jsonschema==4.17.3
+pyspark==3.3.2
+pytest==7.4.0
+pandas==2.0.3
+numpy==1.24.3
+requests==2.31.0
+python-dotenv==1.0.0
